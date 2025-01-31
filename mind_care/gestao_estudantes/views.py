@@ -1,11 +1,13 @@
 from pyexpat.errors import messages
+from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
+from django.contrib.auth.hashers import check_password
+from django.http import HttpResponseForbidden
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
-from .models import Administrador, Emocoes, Relatorios
-from .models import Organization, Server
+from .models import Administrador, Emocoes, Relatorios, Organization, Server
 from .forms import AddressForm, OrganizationForm, StudentForm, ServerForm
 import json
 
@@ -42,6 +44,43 @@ class RelatoriosListView(ListView):
     model = Relatorios
     template_name = 'relatorios_list.html'
 
+
+#LOGINs
+
+@csrf_exempt
+def login_view(request):
+    if request.method == "POST":
+        email = request.POST.get("email")
+        senha = request.POST.get("password")
+
+        # Verifica se é um Administrador
+        administrador = Administrador.objects.filter(email=email).first()
+        if administrador and administrador.senha == senha:
+            request.session['user_id'] = administrador.id_adm
+            request.session['user_type'] = 'admin'
+            messages.success(request, "Login realizado com sucesso!")
+            return redirect('home')
+        
+        # Verifica se é um Servidor
+        servidor = Server.objects.filter(email=email).first()
+        if servidor and servidor.password == senha:
+            request.session['user_id'] = servidor.id
+            request.session['user_type'] = 'server'
+            messages.success(request, "Login realizado com sucesso!")
+            return redirect('home')  
+
+        messages.error(request, "Credenciais inválidas. Tente novamente.")
+    
+    return render(request, "login.html")
+
+#Proteção view
+def user_required(view_func):
+    def wrapper(request, *args, **kwargs):
+        if 'user_type' not in request.session:
+            return HttpResponseForbidden("Acesso negado")
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
 # View para listar as organizações
 def list_organizations(request):
     organizations = Organization.objects.all()
@@ -56,14 +95,8 @@ def create_organization(request):
         if address_form.is_valid() and organization_form.is_valid():
             # Salva o endereço
             address = address_form.save()
-
-            # Cria a organização, mas não a salva ainda
             organization = organization_form.save(commit=False)
-
-            # Atribui o objeto de endereço à organização
             organization.address = address
-
-            # Agora salva a organização com o endereço completo
             organization.save()
 
             return redirect('list_organizations')
@@ -90,7 +123,7 @@ def student_create(request):
         print(request.POST)  # Verifique o conteúdo dos dados enviados
         if form.is_valid():
             form.save()
-            return redirect('student_list')  # Redirecionar para a lista de estudantes
+            return redirect('student_list')
         else:
             print(form.errors)  # Exibe os erros de validação
     else:
@@ -103,7 +136,7 @@ def create_server(request):
         
         if form.is_valid():
             form.save()
-            return redirect('server_list')
+            return redirect('home')
     else:
         form = ServerForm()
     # Obtém a lista de organizações para exibir no select do formulário
@@ -138,7 +171,7 @@ def cadastro(request):
             contatos=contatos,
             email=email,
             sexo=sexo,
-            senha=senha,  # Nota: Utilize hashing para senhas
+            senha=senha,  #Utilize hashing para senhas
         )
         administrador.save()
 
@@ -177,7 +210,9 @@ def receber_relatorios(request):
         return JsonResponse({'status': 'Relatório recebido e armazenado com sucesso'})
 
 def home(request):
-    return render(request, 'home.html')
+    user_type = request.session.get('user_type')  # Pode ser 'admin' ou 'server'
+    return render(request, "home.html", {'user_type': user_type})
 
-def home1(request):
-    return render(request, 'home1.html')
+def base_view(request):
+    user_type = request.session.get('user_type')
+    return render(request, 'base.html', {'user_type': user_type})
